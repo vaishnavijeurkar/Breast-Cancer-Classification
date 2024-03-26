@@ -18,11 +18,6 @@ The project will involve the following methodologies:
 
 A successful outcome of this study could significantly impact breast cancer diagnosis by providing a more informed basis for treatment decisions. Accurate classification of tissue samples based on FNAC characteristics could enhance the efficiency and accuracy of breast cancer diagnosis, ultimately leading to improved patient outcomes.
 
-## Repository Contents
-
-- `report/`: Directory containing the dataset used in the study.
-- `code/`: Directory containing the code for data analysis and model implementation.
-
 ## Contributors
 
 - Vaishnavi Jeurkar
