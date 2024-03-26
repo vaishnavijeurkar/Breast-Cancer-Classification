@@ -1,0 +1,511 @@
+---
+title: "Breast Cancer Classification"
+author: "Vaishnavi Jeurkar"
+output:
+  bookdown::pdf_document2: default
+  bookdown::html_document2: default
+---
+
+```{r  setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Abstract
+
+This study delves into the examination of data collected from 699 women in Wisconsin who underwent a biopsy known as fine needle aspiration cytology (FNAC) to assess breast tissue. Nine characteristics, such as cell size and shape, were measured on a scale of one to ten, indicating cell health. The main objective is to determine if these characteristics alone can accurately classify tissue samples as benign or malignant. Assuming these women represent a random subset experiencing breast cancer symptoms, the project will extensively analyze this dataset. It will involve fitting a logistic regression model using best subset selection and implementing the Lasso penalty method. Additionally, Linear Discriminant Analysis will be employed. The aim is to evaluate the reliability of these characteristics in distinguishing between benign and malignant breast tissue. A successful outcome could significantly impact breast cancer diagnosis, aiding in more informed treatment decisions.
+
+# Data Exploration
+Initially, the data exploration and preparation involved converting the variables from factors to numerical representations. Following this, the class variables were transformed from categorical to numerical, with 'benign' denoted as 0 and 'malignant' as 1. Notably, the dataset contained 16 missing attributes in the 'Bare.Nuclei' column. To address this, the rows with missing attributes were removed. Consequently, the dataset was reduced to 444 observations classified as benign and 239 observations classified as malignant.
+
+
+```{r, message = FALSE, warning = FALSE}
+library(dplyr)
+## Load mlbench package
+library(mlbench)
+# Required libraries
+library(caret)
+library(purrr)
+library(bestglm)
+## Load the glmnet package
+library(glmnet)
+library(MASS)
+```
+
+
+```{r}
+## Load the data
+data(BreastCancer)
+```
+
+```{r}
+#transform features from factor to integer
+BreastCancer = BreastCancer %>%
+  mutate(across(2:10, as.character)) %>%
+  mutate(across(2:10, as.numeric))
+#Transform class variable into 0 and 1's
+BreastCancer$Class = as.integer(BreastCancer$Class) - 1
+```
+
+```{r}
+#Removing Null values
+BreastCancer = BreastCancer %>%
+  filter(!is.na(Bare.nuclei))
+```
+
+### Data Summary
+```{r}
+summary(BreastCancer[ , 2:10])
+```
+
+The summary provides insights into the range, spread, and central tendencies of the predictor variables, showcasing their variability and distribution across the dataset. Features like 'Cl.thickness' exhibits higher means and broader ranges, hinting at potentially significant variability within the dataset. Mitoses has the lowest mean and variability across the dataset.
+
+
+### Scatter plot matrix
+```{r}
+pairs(BreastCancer[ , 2:10], col=BreastCancer[ , 11] + 1, oma=c(3,3,3,15))
+par(xpd = TRUE)
+class_labels = as.factor(BreastCancer$Class)
+legend("bottomright", fill = unique(class_labels), legend = c( levels(class_labels)))
+```
+
+The scatterplot matrix reveals a distinct separation between the two classes across response variables, highlighting a clear distinction. However, weaker separations are noticeable in normal.nucleoli, bare.nuclei, marg.adhesion, and epith.c.size, suggesting overlapping values between classes in these specific variables. Notably, a robust positive relationship exists between cell.size and cell.shape, indicating a strong correlation where an increase in one corresponds to an increase in the other. These findings offer valuable insights into the dataset's class separations and interrelationships among predictor variables.
+
+### Covariance matrix
+```{r}
+cov_matrix = var(BreastCancer[,2:10])
+cov_matrix
+```
+
+The covariance matrix provides insights into the relationships between predictor variables in the dataset. Observing the matrix, higher covariance values between variables such as 'Cell.size', 'Cell.shape', and 'Bare.nuclei' indicate stronger positive relationships among these features. This implies that as one of these variables increases, the others tend to increase as well, suggesting potential multicollinearity among them. Conversely, lower covariance values, such as those between 'Cl.thickness', 'Marg.adhesion', 'Epith.c.size', and other variables, suggest weaker relationships or less linear dependency among these particular features. Mitoses has weak positive relationship with all the variables. The diagonal elements in the matrix represent the variables' variances, highlighting the spread or variability of each predictor variable individually. 
+
+### Total variance
+
+```{r}
+total_var = sum(diag(cov_matrix))
+```
+The total variance of 71.03 represents the overall variability or dispersion captured within the dataset by the predictor variables considered. This is useful because it suggests that these features are quite important in understanding the data and could be helpful in understanding whether a sample is benign or malignant in a breast cancer dataset.
+
+### Generalized variance
+
+```{r}
+generalized_var = det(cov_matrix)
+```
+Generalized variance of 53335.79 suggests the overall spread or variability across the dataset, considering all variables together. A higher generalized variance indicates that there's considerable diversity or differences among the data points when taking into account all the variables collectively. This information is valuable as it implies that the dataset covers a wide range of values or patterns across various features. 
+
+### Correlation matrix
+
+```{r}
+cor(BreastCancer[,2:11])
+```
+ **Correlation Between Response and Predictor Variables:**
+
+The 'Class' variable demonstrates relatively strong positive correlations with predictor variables 'Cl.thickness', 'Cell.size', 'Cell.shape', 'Marg.adhesion', 'Epith.c.size', 'Bare.nuclei', and 'Bl.cromatin'. These correlations range between 0.71 to 0.82. This suggests that as these predictor variables increase, there tends to be a higher likelihood or association with the 'Class' variable, potentially indicating their importance in predicting whether a sample is benign or malignant.
+The 'Mitoses' variable has a weaker correlation (0.42) with the 'Class' variable compared to other predictors, implying a relatively less strong relationship in predicting the class.
+
+ **Correlation Among Predictor Variables:**
+
+Among the predictor variables themselves, there are notable strong positive correlations observed between 'Cell.size', 'Cell.shape', 'Bare.nuclei' and 'Bl.cromatin'. These features exhibit correlations ranging from 0.69 to 0.82, suggesting potential multicollinearity among these variables, indicating that changes in one of these variables might be associated with changes in others.
+Similarly, 'Cell.size' and 'Cell.shape' show a strong positive correlation of approximately 0.91, implying a highly correlated relationship between these two predictors. Similar strong relationships are observed between 'Cell.size' or 'Cell.shape' and 'Bl.cromatin'.
+
+### Standard deviation
+
+```{r}
+apply(BreastCancer[ , 2:10], 2, sd)
+```
+The standard deviation values highlight the dispersion of data points within each predictor variable. Higher standard deviations, such as those observed in 'Normal.nucleoli', 'Bare.nuclei' and 'Cell.size', suggest greater variability in their values across the dataset, indicating a wider spread from their respective means. Conversely, 'Mitoses' exhibits lower variability, with data points clustered closer to its mean.
+
+```{r}
+# Exclude the first column ('ID') from the dataset
+BreastCancer = BreastCancer[, 2:11]  # Exclude the first column
+```
+
+```{r}
+# Set the seed for reproducibility
+set.seed(123)
+# Split the dataset into 80% training and 20% testing
+trainIndex = createDataPartition(BreastCancer$Class, p = 0.8, list = FALSE)
+training = BreastCancer[trainIndex, ]
+testing = BreastCancer[-trainIndex, ]
+
+# Separate predictors (X) and target variable (y) in both train and test sets
+X_train = training[, -which(names(training) == "Class")]
+y_train = training$Class
+
+X_test = testing[, -which(names(testing) == "Class")]
+y_test = testing$Class
+```
+
+# Fitting a logistic regression model.
+
+The dataset underwent a division into two subsets: 80% training set and 20% test set. Both the training and test sets were scaled and a logistic regression model was fit using the glm function.
+
+```{r}
+#Standardise X_train and x_test
+X_train = scale(X_train)
+center = attr(X_train, "scaled:center")
+scale = attr(X_train, "scaled:scale")
+X_test = scale(X_test, center=center, scale=scale)
+#Create test and train dataframe
+CancerTrain_data = data.frame(X_train, y_train)
+CancerTest_data = data.frame(X_test, y_test)
+#store values for n and p
+n = nrow(CancerTrain_data); p = ncol(CancerTrain_data) - 1
+```
+
+
+```{r}
+#fit a logistic regression model
+logreg_fit = glm(y_train ~ ., data=CancerTrain_data, family="binomial")
+summary(logreg_fit)
+```
+
+The maximum likelihood estimates of the regression coefficients are therefore
+
+$\hat{\beta}_0 = -1.002, \hat{\beta}_1 = 1.095, \hat{\beta}_2 = 0.503, \hat{\beta}_3 = 0.817, \hat{\beta}_4 = 0.919, \hat{\beta}_5 = 0.092, \hat{\beta}_6 = 1.515, \hat{\beta}_7 = 1.390, \hat{\beta}_8 = 0.456, \hat{\beta}_9 = 0.890$
+
+The p-value for Cl.thickness, Marg.adhesion, Bare.nuclei and Bl.cromatin is less than 0.05
+If we examine the table produced by the summary function we see that a number of the variables have very large p-values meaning that, individually, they contribute very little to a model which contains all the other predictors. Inclusion of more predictors than are necessary can inflate the variance of the parameter estimators leading
+to a deterioration in predictive performance. 
+
+### Cross-Validation
+Cross validation on all the models is performed using Validation set approach.
+
+```{r}
+#Calculating training error and confusion matrix
+## Compute predicted probabilities:
+phat = predict(logreg_fit, data.frame(CancerTrain_data), type = "response")
+## Compute fitted (i.e. predicted) values:
+yhat = ifelse(phat > 0.5, 1, 0)
+## Calculate confusion matrix:
+(confusion = table(Observed = y_train, Predicted = yhat))
+```
+From the confusion matrix we can see that benign is correctly predicted 348 times out of 348 + 7 = 355 observations. The model correctly identified malignant cancer 185 times. The training error is the proportion of misclassified
+observations
+
+```{r}
+## Calculate the training error:
+print("Training error for logistic regression is: ")
+1 - mean(y_train == yhat)
+```
+i.e. around 2.56% of training error is seen.
+
+```{r}
+#Calculating test error and confusion matrix
+## Compute predicted probabilities:
+phat = predict(logreg_fit, data.frame(CancerTest_data), type="response")
+## Compute fitted (i.e. predicted) values:
+yhat = ifelse(phat > 0.5, 1, 0)
+## Calculate confusion matrix:
+(confusion = table(Observed=y_test, Predicted = yhat))
+```
+The model trained using training data is applied on the test data and we get the corresponding confusion matrix.
+This model is able to predict benign cancer 87 out of 89 times and it correctly identifies malignant cancer 43 out of 47 observations.
+
+```{r}
+## Calculate the test error:
+print("Test error for logistic regression is: ")
+1 - mean(y_test == yhat)
+```
+The test error is around 4.4% which is higher than the training error. When the test error is higher than the training error, it suggests that the model might be overfitting the training data. Factors contributing to overfitting include excessive model complexity, using too many features relative to the amount of data, or inadequate regularization techniques. In contrast, if the test error is close to the training error or even lower, it indicates that the model has successfully captured the underlying patterns and can generalize well to new data, showcasing its robustness. Regularization methods, cross-validation, or reducing model complexity are strategies commonly employed to address overfitting and mitigate the disparity between training and test errors.
+
+# Best Subset Selection in logistic regression
+
+In the earlier model it is observed that some of the features do not have any significant effect on the model's output. Therefore to find the optimal model we apply different feature selection techniques.   
+We can apply best subset selection using AIC and BIC using the bestglm package.
+
+```{r, message=FALSE}
+set.seed(123)
+bss_fit_AIC = bestglm(CancerTrain_data, family=binomial, IC="AIC")
+bss_fit_BIC = bestglm(CancerTrain_data, family=binomial, IC="BIC")
+best_AIC = bss_fit_AIC$ModelReport$Bestk
+best_BIC = bss_fit_BIC$ModelReport$Bestk
+```
+By construction the implied models $M_0, M_1, \ldots, M_p$ are same in both AIC and BIC, (See Appendix A). Only difference is the final column named AIC and BIC. The model minimising AIC and BIC are starred in each case. As for logistic regression, different criteria often suggest different models are “best”, and this is the case here. In order to reconcile the differences and choose a single “best” model we generate a plot to show how the criteria vary with the number of predictors. (See Appendix B Figure \@ref(fig:optimal-subset))   
+
+AIC: Tends to select larger models that might fit the data better but could be more complex.  
+BIC: Penalizes complexity more than AIC and often selects smaller models compared to AIC.  
+Here AIC has selected best model with 7 predictors and BIC suggests 5 predictor model to be the best.  
+In order to identify the best model we will train both models and compare their test errors.
+
+
+
+
+```{r}
+pstar = 5
+## Construct a reduced data set containing only the selected predictors
+indices = as.logical(bss_fit_BIC$Subsets[pstar+1, 2:(p+1)])
+
+Cancer_data_red_BIC = data.frame(X_train[,indices], y_train)
+Cancer_data_red_BIC_test =  data.frame(X_test[,indices], y_test)
+```
+
+### Best subset selection with BIC
+
+
+```{r}
+## Obtain logistic regression coefficients for BIC model
+logreg1_fit = glm(y_train ~ ., data=Cancer_data_red_BIC, family = "binomial")
+summary(logreg1_fit)
+```
+The maximum likelihood estimates of the regression coefficients are
+
+$\hat{\beta}_0 = -1.05, \hat{\beta}_1 = 1.433, \hat{\beta}_2 = 1.539, \hat{\beta}_3 = 1.008, \hat{\beta}_4 = 1.631, \hat{\beta}_5 = 1.480$    
+
+The model summary clearly indicates a robust association between the predictor and response variables. Each variable exhibits positive coefficients, signifying a positive relationship. Additionally, all variables demonstrate p-values below 0.05, indicating a strong statistical significance and reinforcing the presence of a compelling positive correlation among the variables.
+
+This model has selected Cl.thickness, Cell.size, Marg.adhesion, Bare.nuclei and Bl.cromatin variables and rest all are dropped from the model. These variables showed strong positive correlation with Class variable in the earlier correlation matrix. 4 of the variables except Cell.size had p-values less than 0.05 in earlier simple logistic regression model.
+
+### Test error
+
+```{r}
+#calculating test error of BIC
+## Compute predicted probabilities:
+phat_test = predict(logreg1_fit, data.frame(Cancer_data_red_BIC_test), type = "response")
+## Compute fitted (i.e. predicted) values:
+yhat = ifelse(phat_test > 0.5, 1, 0)
+print("Confusion matrix of subset selection with BIC")
+## Calculate confusion matrix:
+(confusion = table(Observed = y_test, Predicted = yhat))
+```
+
+```{r}
+## Calculate the test error:
+print("Test error for best subset selection with BIC is: ")
+1 - mean(y_test == yhat)
+```
+The test error for best subset selection with BIC is 3.67%. This error is less compared to the first regression model.
+
+### Best subset selection with AIC
+
+```{r}
+pstar = 7
+## Construct a reduced data set containing only the selected predictors
+indices1 = as.logical(bss_fit_AIC$Subsets[pstar+1, 2:(p+1)])
+
+Cancer_data_red_AIC = data.frame(X_train[,indices1], y_train)
+Cancer_data_red_AIC_test =  data.frame(X_test[,indices1], y_test)
+```
+
+```{r}
+## Obtain logistic regression coefficients for AIC model
+logreg2_fit = glm(y_train ~ ., data=Cancer_data_red_AIC, family = "binomial")
+summary(logreg2_fit)
+```
+The maximum likelihood estimates of the regression coefficients are
+
+$\hat{\beta}_0 = -1.019, \hat{\beta}_1 = 1.156, \hat{\beta}_2 = 1.176, \hat{\beta}_3 = 0.946, \hat{\beta}_4 = 1.538, \hat{\beta}_5 = 1.437, \hat{\beta}_5 = 0.5444, \hat{\beta}_5 = 0.923$    
+
+The model summary indicates a association between the predictor and response variables. Each variable exhibits positive coefficients, signifying a positive relationship. All variables except Normal.nucleoli and Mitoses demonstrate p-values below 0.05, indicating a strong statistical significance and reinforcing the presence of a compelling positive correlation among the variables.
+
+This model has additional features, Normal.nucleoli and mitoses with the features Cl.thickness, Cell.size, Marg.adhesion, Bare.nuclei and Bl.cromatin that were present in BIC and rest all are dropped from the model. 
+
+### Test error 
+
+```{r}
+#Calculating test error of AIC
+## Compute predicted probabilities:
+phat_test = predict(logreg2_fit, data.frame(Cancer_data_red_AIC_test), type = "response")
+## Compute fitted (i.e. predicted) values:
+yhat = ifelse(phat_test > 0.5, 1, 0)
+## Calculate confusion matrix:
+(confusion = table(Observed=y_test, Predicted=yhat))
+```
+
+```{r}
+## Calculate the test error:
+print("Test error for best subset selection with AIC is: ")
+1 - mean(y_test == yhat)
+```
+The test error of best subset selection with AIC is same as the logistic regression model. This suggests that for BreastCancer data a model fitted with 5 features is better than 7 feature model.
+
+# Regularized Logistic regression with Lasso penalty
+
+The method operates by introducing a penalty, which is scaled by a tuning parameter, into the loss function. This modified loss function, in logistic regression, represents the negative logarithm of the likelihood function. In R, Lasso can be implemented using the 'glmnet' package.  
+
+$\text{Lasso Penalty}$ = $\lambda$ $\sum_{j=1}^{p}$ $|\beta_j|$    
+$\lambda$ represents the regularization parameter.   
+$\text{p}$ denotes the number of predictors or coefficients in the model.    
+$\beta_j$ signifies the coefficients associated with each predictor in the model.   
+
+$\text{Loss function}$ = $\text{SSe}$ + $\lambda$ $\sum_{j=1}^{p}$ $|\beta_j|$ 
+```{r}
+## Choose grid of values for the tuning parameter
+grid = 10^seq(-3,-0.3, length.out=100)
+## Fit a model with LASSO penalty for each value of the tuning parameter
+lasso_fit = glmnet(X_train, y_train, family="binomial", 
+                   alpha = 1, standardize = FALSE, lambda=grid)
+```
+
+We can use the plot function to examine how the coefficients of each variable change as the tuning parameter is increased, (See Appendix B Figure \@ref(fig:lasso-tuning)). In this plot we can see that as the LASSO performs variable selection, in addition to shrinkage, we see variables drop from the model as the tuning parameter increases. Each line represents the regression coefficient for a different variable. First variable to drop is mitoses followed by Epith.c.size. The last  variable to drop is cell.shape.  
+
+```{r, out.width = "85%"}
+lasso_cv_fit = cv.glmnet(as.matrix(X_train), y_train, family = "binomial", 
+                         alpha = 1, standardize = FALSE, lambda = grid, type.measure = "class")
+plot(lasso_cv_fit)
+```
+
+The regression coefficients obtained by performing the LASSO with the chosen value of lambda are:
+
+```{r}
+## Identify the optimal value for the tuning parameter
+lambda_lasso_min = lasso_cv_fit$lambda.min
+which_lambda_lasso = which(lasso_cv_fit$lambda == lambda_lasso_min)
+## Find the parameter estimates associated with optimal value of the tuning parameter
+coef(lasso_fit, s=lambda_lasso_min)
+```
+At the optimal solution none of the variables drop out of the model.
+
+### Training error
+
+```{r}
+#Calculating training error and confusion matrix for Lasso
+## Compute predicted probabilities:
+phat = predict(lasso_fit, X_train, s = lambda_lasso_min, type="response")
+## Compute fitted (i.e. predicted) values:
+yhat = ifelse(phat > 0.5, 1, 0)
+## Calculate confusion matrix:
+(confusion = table(Observed=y_train, Predicted=yhat))
+```
+
+```{r}
+## Calculate the training error:
+print("Training error for logistic regression with Lasso is: ")
+1 - mean(y_train == yhat)
+```
+The training error of regularized logistic regression with Lasso penalty is same as logistic regression model fitted without penalty
+
+### Test error
+
+```{r}
+#Calculating test error of Lasso
+## Compute predicted probabilities:
+phat_test = predict(lasso_fit, X_test, s = lambda_lasso_min, type="response")
+## Compute fitted (i.e. predicted) values:
+yhat_test = ifelse(phat_test > 0.5, 1, 0)
+## Calculate confusion matrix:
+(confusion = table(Observed = y_test, Predicted = yhat_test))
+```
+
+```{r}
+## Calculate the test error:
+print("Test error for logistic regression with Lasso is: ")
+1 - mean(y_test == yhat_test)
+```
+The test error (5.1%) is slightly higher for the model fitted with the LASSO penalty. Therefore of the two models, it seems that the model fitted without penalty performs better, based on this particular partition of the data into training and validation sets.
+
+# Bayes classifier for Linear Disciminant Analysis
+
+All the variables have been used in the LDA model.
+
+```{r}
+lda_model = lda(y_train ~ ., data = data.frame(X_train))
+lda_model
+```
+Above model shows, Prior probabilities of groups:   
+64.89% belongs to benign cancer and 35.10% belongs to malignant cancer.  
+
+Group means   
+It shows the class wise average (standardised) values for each predictor variables. This helps in comparing how the average values of variables varies between two class. A large difference in average values suggests good seperation between the classes.   
+
+Coefficients of linear discriminants:
+The discriminant function is a linear combination of 9 variables.
+
+$0.445 \times \text{Cl.thickness} + 0.457 \times \text{Cell.size} + 0.280 \times \text{Cell.shape} + 0.121 \times \text{Marg.adhesion} + 0.107 \times \text{Epith.c.size} + 0.973 \times \text{Bare.nuclei} + 0.292 \times \text{Bl.cromatin} + 0.323 \times \text{Normal.nucleoli} - 0.031 \times \text{Mitoses}$
+
+### Training error
+
+```{r}
+#Calculating training error and confusion matrix for LDA
+## Compute predicted probabilities:
+phat = predict(lda_model, data.frame(CancerTrain_data), type = "response")
+## Compute fitted (i.e. predicted) values:
+yhat = phat$class
+## Calculate confusion matrix:
+(confusion = table(Observed = y_train, Predicted = yhat))
+```
+
+```{r}
+## Calculate the training error:
+print("Training error for logistic regression with LDA is: ")
+1 - mean(y_train == yhat)
+```
+The training error for LDA is higher than the model fitted with Lasso penalty. There have been 12 instances where the model incorrectly classified benign cases as malignant.
+
+### Test error
+
+```{r}
+#Calculating test error of LDA
+## Compute predicted probabilities:
+phat_test = predict(lda_model, data.frame(CancerTest_data), type = "response")
+## Compute fitted (i.e. predicted) values:
+yhat_test = phat_test$class
+## Calculate confusion matrix:
+(confusion = table(Observed = y_test, Predicted = yhat_test))
+```
+
+```{r}
+## Calculate the test error:
+print("Test error for logistic regression with LDA is: ")
+1 - mean(y_test == yhat_test)
+```
+The test error for the linear discriminant analysis model is 6.6% which is highest among all the methods implemented on the Breast Cancer dataset.
+
+# Cross validation and motivation
+
+The cross validation method used in this analysis is validation set approach. This is one of the most basic and simple techniques for evaluating a model. This simplicity is beneficial in scenarios where rapid model prototyping or quick iterations are necessary. This approach makes the comparison fair as same datasets are used for training and testing for all the models implemented. The validation set provides a single performance estimate for the model, allowing for a straightforward evaluation of its generalization capability. It gives a clearer picture of how the model might perform on unseen data. Given size of data was sufficient to perform cross validation using this method.
+
+Comparing the performance of different models using cross validation based on the test error helps in evaluating the performance of each model on unseen data. Test error of logistic regression and best subset selection with AIC is 4.4%. Test error for logistic regression with Lasso penalty is 5.1%. linear discriminant analysis model has the highest test error i.e. 6.6% and best subset selection model with BIC least test error 3.6% among all the models. 
+
+# Conclusion
+
+Among the five variants of logistic regression applied to the Breast Cancer dataset to discern the nature of the cancer (benign or malignant), the model employing the best subset selection method using BIC (Bayesian Information Criterion) demonstrated superior performance. This particular model exhibited an error rate of 3.6%, signifying its accuracy in prediction.
+
+This selected logistic regression model comprises five predictor variables: Cl.thickness, Cell.size, Marg.adhesion, Bare.nuclei, and Bl.cromatin. These variables showcase a notably strong positive correlation with the target class variable. Moreover, they exhibit statistical significance with p-values less than 0.05, further affirming their relevance in the prediction process.
+
+Including more than five variables in the logistic regression model, particularly employing methods such as best subset selection with AIC (Akaike Information Criterion) or utilizing all variables in methods like Lasso or LDA (Linear Discriminant Analysis), results in a higher error rate. This indicates that the additional variables beyond the optimal subset or the complete set of variables do not significantly contribute to improving the predictive capability of the model.
+
+These supplementary variables, when included in the model, do not provide substantial additional information relevant to the prediction of cancer type (benign or malignant). Consequently, their inclusion tends to introduce noise or irrelevant information, resulting in an increased error rate without a corresponding improvement in predictive accuracy. Therefore, the optimal model performance is achieved when considering a limited set of five predictor variables that demonstrate strong associations with the target class variable while maintaining statistical significance and minimizing the error rate.
+
+# References
+
+1. https://www.geeksforgeeks.org/cross-validation-in-r-programming/
+2. https://www.geeksforgeeks.org/convert-factor-to-numeric-and-numeric-to-factor-in-r-programming/
+3. https://rpubs.com/Subhalaxmi/742119
+4. https://bookdown.org/yihui/rmarkdown-cookbook/cross-ref.html
+
+# Appendix
+
+## Appendix A - Best Subset Selection Outputs
+
+1. **AIC Subsets**
+
+```{r}
+bss_fit_AIC$Subsets
+```
+2. **BIC Subsets**
+
+```{r}
+bss_fit_BIC$Subsets
+```
+
+## Appendix B - Plots
+
+1. **Figure 1**
+
+```{r optimal-subset, fig.cap="Best Subset selection for Cancer data"}
+par(mfrow = c(1,3))
+## Produce plots, highlighting optimal value of k
+plot(0:p, bss_fit_AIC$Subsets$AIC, xlab = "Number of predictors", ylab = "AIC", type = "b")
+points(best_AIC, bss_fit_AIC$Subsets$AIC[best_AIC+1], col="red", pch = 16)
+plot(0:p, bss_fit_BIC$Subsets$BIC, xlab = "Number of predictors", ylab = "BIC", type = "b")
+points(best_BIC, bss_fit_BIC$Subsets$BIC[best_BIC+1], col = "red", pch = 16)
+
+```
+
+
+2. **Figure 2**
+
+```{r lasso-tuning, fig.cap="The effect of varying the tuning parameter in the logistic regression model with LASSO penalty for the Weekly data."}
+## Examine the effect of the tuning parameter on the parameter estimates
+plot(lasso_fit, xvar = "lambda", col=  rainbow(p), label = TRUE)
+```
